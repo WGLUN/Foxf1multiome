@@ -1,2 +1,4 @@
 library(Signac);library(Seurat);library(ensembldb);library(EnsDb.Mmusculus.v79);library(patchwork)
 set.seed(1234)
+counts <- Read10X_h5("~/filtered_feature_bc_matrix.h5")
+counts <- Read10X_h5("~/filtered_feature_bc_matrix.h5")
