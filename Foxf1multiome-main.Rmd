@@ -6,46 +6,142 @@ library(EnsDb.Mmusculus.v79);library(JASPAR2020);library(TFBSTools);library(moti
 set.seed(1234)
 
 # read dataset from outs folder of cellranger count
-wt.data <- Read10X(data.dir = "../data/acd-wt/filtered_gene_bc_matrices/")
-wt.data <- Read10X(data.dir = "../data/acd-mt/filtered_gene_bc_matrices/")
-# Initialize the Seurat object with the raw counts
-wt.all <- CreateSeuratObject(counts = wt.data, project = "WT")
-mt.all <- CreateSeuratObject(counts = mt.data, project = "S52F")
-# Stash QC stats data into the Seurat object
-wt.all[["percent.mt"]] <- PercentageFeatureSet(wt.all, pattern = "^mt-")
-mt.all[["percent.mt"]] <- PercentageFeatureSet(mt.all, pattern = "^mt-")
+counts <- Read10X_h5("~/multi/filtered_feature_bc_matrix.h5")
+# Initialize the Seurat object for GEX library alone
+multi.gex <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+multi.gex[["percent.mt"]] <- PercentageFeatureSet(multi.gex, pattern = "^mt-")
+multi.gex <- PercentageFeatureSet(multi.gex, pattern = "^mt-", col.name = "percent.mt")
+
 # Visualize QC metrics as a violin plot
-VlnPlot(wt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
-VlnPlot(mt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
-# Setup the Seurat objects for integrated analysis
-acd.list <- list(wt.all,mt.all)
-acd.list <- lapply(X = acd.list, FUN = function(x) {
-  x <- NormalizeData(x)
-  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
-})
-# Perform integration
-acd.anchors <- FindIntegrationAnchors(object.list = acd.list, dims = 1:20)
-acd.combined <- IntegrateData(anchorset = acd.anchors, dims = 1:20)
-# Perform an integrated analysis
-DefaultAssay(acd.combined) <- "integrated"
-acd.combined <- ScaleData(acd.combined, features = genework,verbose = FALSE)
-acd.combined <- RunPCA(acd.combined, npcs = 30, verbose = FALSE)
-ElbowPlot(acd.combined)
-acd.combined <- RunUMAP(acd.combined, reduction = "pca", dims = 1:8)
-acd.combined <- FindNeighbors(acd.combined, reduction = "pca", dims = 1:8)
-acd.combined <- FindClusters(acd.combined, resolution = 0.5)
-# Visualization of results
-DimPlot(acd.combined, reduction = "umap",split.by = 'orig.ident')
-DimPlot(acd.combined, reduction = "umap",label = T)
-# Check the cell distribution
-table(Idents(acd.combined),acd.combined$orig.ident)
-#Identify conserved cell type markers
-acd.markers <- FindAllMarkers(acd.combined, only.pos = TRUE, min.pct = 0.4, logfc.threshold = 0.4)
-# Rename Idents
-acd.combined <- RenameIdents(acd.combined, "AT1" = "AT1", "AT1/2" = "AT1/2", "AT2" = "AT2", "Endo" = "Endothelial", "Fibroblast-1" = "Fibroblast-1", "Fibroblast-2" = "Fibroblast-2","Pericyte-1" = "Pericyte", "Pericyte-2" = "Pericyte", "Matrix Mes-1" = "Matrix.FB-1", "Matrix Mes-2" = "Matrix.FB-2", "smooth muscle" = "Myofibroblast","Ciliated" = "Ciliated","club" = "Club")
+VlnPlot(multi.gex, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+# Setup the Seurat objects for unsupervised clustering analysis
+multi.gex <- subset(multi.gex, subset = nFeature_RNA > 200 & nFeature_RNA < 6000 & percent.mt < 20)
+multi.gex <- SCTransform(multi.gex, vars.to.regress = "percent.mt", verbose = FALSE)
+multi.gex <- RunPCA(multi.gex, verbose = FALSE)
+multi.gex <- RunUMAP(multi.gex, dims = 1:30, verbose = FALSE)
+multi.gex <- FindNeighbors(multi.gex, dims = 1:30, verbose = FALSE)
+multi.gex <- FindClusters(multi.gex, verbose = FALSE)
+DimPlot(multi.gex, label = TRUE) + NoLegend()
+
+# Initialize the Seurat object for both GEX and ATAC library
+
+fragpath <- "~/multi/atac_fragments.tsv.gz"
+
+# get gene annotations for mm10
+edb <- EnsDb.Mmusculus.v79
+seqlevelsStyle(edb) <- "UCSC"
+annotations <- GetGRangesFromEnsDb(ensdb = edb)
+genome(annotations) <- "mm10"
+
+# create a Seurat object containing the RNA adata
+multi.joint <- CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+# create ATAC assay and add it to the object
+multi.joint[["ATAC"]] <- CreateChromatinAssay(
+  counts = counts$Peaks,
+  sep = c(":", "-"),
+  fragments = fragpath,
+  annotation = annotations
+)
+
+DefaultAssay(multi.joint) <- "ATAC"
+
+multi.joint <- NucleosomeSignal(multi.joint)
+multi.joint <- TSSEnrichment(multi.joint)
+
+VlnPlot(
+  object = multi.joint,
+  features = c("nCount_RNA", "nCount_ATAC", "TSS.enrichment", "nucleosome_signal"),
+  ncol = 4,
+  pt.size = 0
+)
+
+# filter out low quality cells
+multi.joint <- subset(
+  x = multi.joint,
+  subset = nCount_ATAC < 100000 &
+    nCount_RNA < 40000 &
+    nCount_ATAC > 1000 &
+    nCount_RNA > 1000 &
+    nucleosome_signal < 1 &
+    TSS.enrichment > 1
+)
+
+
+# Data processing
+DefaultAssay(multi.joint) <- "RNA"
+multi.joint <- SCTransform(multi.joint)
+multi.joint <- RunPCA(multi.joint)
+
+DefaultAssay(multi.joint) <- "ATAC"
+multi.joint <- FindTopFeatures(multi.joint, min.cutoff = 5)
+multi.joint <- RunTFIDF(multi.joint)
+multi.joint <- RunSVD(multi.joint)
+
+# build a joint neighbor graph using both assays
+multi.joint <- FindMultiModalNeighbors(
+  object = multi.joint,
+  reduction.list = list("pca", "lsi"), 
+  dims.list = list(1:50, 2:40),
+  modality.weight.name = "RNA.weight",
+  verbose = TRUE
+)
+
+# build a joint UMAP visualization
+multi.joint <- RunUMAP(
+  object = multi.joint,
+  nn.name = "weighted.nn",
+  assay = "RNA",
+  verbose = TRUE
+)
+DimPlot(multi.joint, label = TRUE, repel = TRUE, reduction = "umap") + NoLegend()
+
 # Generation of Heatmap
-top10 <- acd.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
-DoHeatmap(acd.combined, features = top10$gene) + NoLegend()
+gex.markers <- FindAllMarkers(multi.temp, only.pos = TRUE, min.pct = 0.5, logfc.threshold = 0.5)
+top10 <- gex.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+DoHeatmap(subset(multi.temp,downsample = 400 ), features = top10$gene,group.by = 'ident',draw.lines = T,lines.width = 10,label = F) + NoLegend()
+
+# Generation of Donutplot
+donut <- table(Idents(multi.joint),multi.joint$orig.ident)
+donut <- as.data.frame(donut)
+library(ggpubr)
+ggdonutchart(donut,'cells',fill = 'cluster',color = 'white') + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=20),axis.text.x =element_text(size=0))
+
+library(ChIPseeker)
+library("TxDb.Mmusculus.UCSC.mm10.knownGene")
+library("org.Mm.eg.db")
+
+# Generation peak list from each group
+
+for(i in levels(multi.joint)) {
+  peak.list <- list()
+  peak.list[[i]] <- AccessiblePeaks(multi.joiny, idents = i)
+  peak.list[[i]] <- StringToGRanges(peak.list[[i]], sep = c("-", "-"))
+  assign(paste("cell",".",i,sep = ""), peak.list[[i]])
+  
+  peak.list <- GenomicRanges::GRangesList(`CAP1 (gCAP)` = readPeakFile(`cell.CAP1 (gCAP)`),
+                                        `CAP2 (aCAP)` = readPeakFile(`cell.CAP2 (aCAP)`),
+                                        Artery = readPeakFile(cell.Artery),
+                                        Venous = readPeakFile(cell.Venous),
+                                        Lymphatics = readPeakFile(cell.Lymphatics),
+                                        Pericyte = readPeakFile(cell.Pericyte),
+                                        Fibroblast = readPeakFile(cell.Fibroblast),
+                                        Myofibroblast = readPeakFile(cell.Myofibroblast),
+                                        Matrixfibroblast = readPeakFile(cell.Matrixfibroblast))
+library(scales)
+color.use <- as.vector(hue_pal()(n=9))                                     
+peakHeatmap(peak.list, TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, upstream=3000, downstream=3000, color=color.use)                                        
+
+
+
+
 # Generation of Dotplot
 DotPlot(acd.combined, features = c('Acvrl1','Acvr1b','Acvr1c','Bmpr1a','Bmpr1b','Tgfbr1','Tgfbr2','Acvr2a','Acvr2b','Bmpr2'), cols = c("blue","red"), dot.scale = 8,split.by = "orig.ident") + RotatedAxis() + coord_flip()
 # Generation of correlation plot among clusters
