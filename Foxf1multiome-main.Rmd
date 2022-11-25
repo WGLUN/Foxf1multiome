@@ -3,12 +3,67 @@ library(Signac);library(Seurat);library(ensembldb);library(EnsDb.Mmusculus.v79);
 library(ChIPseeker);library("TxDb.Mmusculus.UCSC.mm10.knownGene");library("org.Mm.eg.db");library(BSgenome.Mmusculus.UCSC.mm10);
 library(EnsDb.Mmusculus.v79);library(JASPAR2020);library(TFBSTools);library(motifmatchr)
 
-
-
-
-
-
-
 set.seed(1234)
-counts <- Read10X_h5("~/filtered_feature_bc_matrix.h5")
-counts <- Read10X_h5("~/filtered_feature_bc_matrix.h5")
+
+# read dataset from outs folder of cellranger count
+wt.data <- Read10X(data.dir = "../data/acd-wt/filtered_gene_bc_matrices/")
+wt.data <- Read10X(data.dir = "../data/acd-mt/filtered_gene_bc_matrices/")
+# Initialize the Seurat object with the raw counts
+wt.all <- CreateSeuratObject(counts = wt.data, project = "WT")
+mt.all <- CreateSeuratObject(counts = mt.data, project = "S52F")
+# Stash QC stats data into the Seurat object
+wt.all[["percent.mt"]] <- PercentageFeatureSet(wt.all, pattern = "^mt-")
+mt.all[["percent.mt"]] <- PercentageFeatureSet(mt.all, pattern = "^mt-")
+# Visualize QC metrics as a violin plot
+VlnPlot(wt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+VlnPlot(mt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+# Setup the Seurat objects for integrated analysis
+acd.list <- list(wt.all,mt.all)
+acd.list <- lapply(X = acd.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+# Perform integration
+acd.anchors <- FindIntegrationAnchors(object.list = acd.list, dims = 1:20)
+acd.combined <- IntegrateData(anchorset = acd.anchors, dims = 1:20)
+# Perform an integrated analysis
+DefaultAssay(acd.combined) <- "integrated"
+acd.combined <- ScaleData(acd.combined, features = genework,verbose = FALSE)
+acd.combined <- RunPCA(acd.combined, npcs = 30, verbose = FALSE)
+ElbowPlot(acd.combined)
+acd.combined <- RunUMAP(acd.combined, reduction = "pca", dims = 1:8)
+acd.combined <- FindNeighbors(acd.combined, reduction = "pca", dims = 1:8)
+acd.combined <- FindClusters(acd.combined, resolution = 0.5)
+# Visualization of results
+DimPlot(acd.combined, reduction = "umap",split.by = 'orig.ident')
+DimPlot(acd.combined, reduction = "umap",label = T)
+# Check the cell distribution
+table(Idents(acd.combined),acd.combined$orig.ident)
+#Identify conserved cell type markers
+acd.markers <- FindAllMarkers(acd.combined, only.pos = TRUE, min.pct = 0.4, logfc.threshold = 0.4)
+# Rename Idents
+acd.combined <- RenameIdents(acd.combined, "AT1" = "AT1", "AT1/2" = "AT1/2", "AT2" = "AT2", "Endo" = "Endothelial", "Fibroblast-1" = "Fibroblast-1", "Fibroblast-2" = "Fibroblast-2","Pericyte-1" = "Pericyte", "Pericyte-2" = "Pericyte", "Matrix Mes-1" = "Matrix.FB-1", "Matrix Mes-2" = "Matrix.FB-2", "smooth muscle" = "Myofibroblast","Ciliated" = "Ciliated","club" = "Club")
+# Generation of Heatmap
+top10 <- acd.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+DoHeatmap(acd.combined, features = top10$gene) + NoLegend()
+# Generation of Dotplot
+DotPlot(acd.combined, features = c('Acvrl1','Acvr1b','Acvr1c','Bmpr1a','Bmpr1b','Tgfbr1','Tgfbr2','Acvr2a','Acvr2b','Bmpr2'), cols = c("blue","red"), dot.scale = 8,split.by = "orig.ident") + RotatedAxis() + coord_flip()
+# Generation of correlation plot among clusters
+palette = colorRampPalette(c("green", "white", "red")) (20)
+av.exp <- AverageExpression(acd.combined)$RNA
+cor.exp <- as.matrix(cor(av.exp))
+heatmap(x = cor.exp, col = palette,Rowv = NA,symm = TRUE,scale = "row",margins = c(8, 8))
+# Cells distribution across clusters and pie plot
+cell.prop <- prop.table(table(Idents(acd.combined),acd.combined$orig.ident),2)
+cell.prop <- 100*cell.prop
+cell.prop <- as.data.frame(cell.prop)
+names(cell.prop)[1:3] <- c('Cluster','group','value')
+ggplot(cell.prop, aes(fill=Cluster, y=value, x=group)) + geom_bar(position="stack", stat="identity") + theme_bw() + scale_y_continuous(expand = c(0,0),limits = c (0,100)) + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=15),axis.title.x =element_text(size=0),axis.title.y=element_text(size=0),axis.text.x =element_text(size=0),axis.text.y=element_text(size=15))
+ggplot(cell.prop[1:12,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
+ggplot(cell.prop[13:24,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
+# 
+
+
+
+
+
