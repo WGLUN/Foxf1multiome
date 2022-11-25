@@ -3,5 +3,33 @@ library(Signac);library(Seurat);library(ensembldb);library(EnsDb.Mmusculus.v79);
 library(ChIPseeker);library("TxDb.Mmusculus.UCSC.mm10.knownGene");library("org.Mm.eg.db");library(BSgenome.Mmusculus.UCSC.mm10);
 library(EnsDb.Mmusculus.v79);library(JASPAR2020);library(TFBSTools);library(motifmatchr)
 
+
+# Generation peak heatmap from each group
+
+for(i in levels(multi.joint)) {
+  peak.list <- list()
+  peak.list[[i]] <- AccessiblePeaks(multi.joiny, idents = i)
+  peak.list[[i]] <- StringToGRanges(peak.list[[i]], sep = c("-", "-"))
+  assign(paste("cell",".",i,sep = ""), peak.list[[i]])
+  
+  peak.list <- GenomicRanges::GRangesList(`CAP1 (gCAP)` = readPeakFile(`cell.CAP1 (gCAP)`),
+                                        `CAP2 (aCAP)` = readPeakFile(`cell.CAP2 (aCAP)`),
+                                        Artery = readPeakFile(cell.Artery),
+                                        Venous = readPeakFile(cell.Venous),
+                                        Lymphatics = readPeakFile(cell.Lymphatics),
+                                        Pericyte = readPeakFile(cell.Pericyte),
+                                        Fibroblast = readPeakFile(cell.Fibroblast),
+                                        Myofibroblast = readPeakFile(cell.Myofibroblast),
+                                        Matrixfibroblast = readPeakFile(cell.Matrixfibroblast))
+library(scales)
+color.use <- as.vector(hue_pal()(n=9))                                     
+peakHeatmap(peak.list, TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, upstream=3000, downstream=3000, color=color.use)   
+
+
+
+
+
+
+
 BigwigTrack('chr8-120800001-120810000',as.list(figtest),smooth = 200,type = "coverage", bigwig.scale = "separate", ymax = NULL, max.downsample = 3000,downsample.rate = 0.1) + scale_fill_discrete()
 figtest <- list.files(pattern="*.bw")
