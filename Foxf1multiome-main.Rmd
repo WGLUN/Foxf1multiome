@@ -111,55 +111,75 @@ DoHeatmap(subset(multi.temp,downsample = 400 ), features = top10$gene,group.by =
 # Generation of Donutplot
 donut <- table(Idents(multi.joint),multi.joint$orig.ident)
 donut <- as.data.frame(donut)
+donut$cluster <- factor(donut$cluster,c("CAP1 (gCAP)", "CAP2 (aCAP)", "Artery","Venous","Lymphatics","Pericyte","Fibroblast","Myofibroblast" ,"Matrixfibroblast"))
 library(ggpubr)
 ggdonutchart(donut,'cells',fill = 'cluster',color = 'white') + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=20),axis.text.x =element_text(size=0))
 
+# Generation distance plot of TSS from each cell cluster
 library(ChIPseeker)
 library("TxDb.Mmusculus.UCSC.mm10.knownGene")
 library("org.Mm.eg.db")
+annopeakfile <- lapply(peak.list, annotatePeak, TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene,tssRegion=c(-3000, 3000),annoDb="org.Mm.eg.db")
+plotDistToTSS(annopeakfile) + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=20),title =element_text(size=0),axis.title.x =element_text(size=20),axis.title.y=element_text(size=20),axis.text.x =element_text(size=20),axis.text.y=element_text(size=20))
+                               
+# Generation of Foxf1 Footprint
+multi.motif <- Footprint(object = multi.motif,motif.name = "Foxf1",genome = BSgenome.Mmusculus.UCSC.mm10)
+PlotFootprint(multi.motif, features = "Foxf1")
 
-# Generation peak list from each group
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
 
-for(i in levels(multi.joint)) {
-  peak.list <- list()
-  peak.list[[i]] <- AccessiblePeaks(multi.joiny, idents = i)
-  peak.list[[i]] <- StringToGRanges(peak.list[[i]], sep = c("-", "-"))
-  assign(paste("cell",".",i,sep = ""), peak.list[[i]])
-  
-  peak.list <- GenomicRanges::GRangesList(`CAP1 (gCAP)` = readPeakFile(`cell.CAP1 (gCAP)`),
-                                        `CAP2 (aCAP)` = readPeakFile(`cell.CAP2 (aCAP)`),
-                                        Artery = readPeakFile(cell.Artery),
-                                        Venous = readPeakFile(cell.Venous),
-                                        Lymphatics = readPeakFile(cell.Lymphatics),
-                                        Pericyte = readPeakFile(cell.Pericyte),
-                                        Fibroblast = readPeakFile(cell.Fibroblast),
-                                        Myofibroblast = readPeakFile(cell.Myofibroblast),
-                                        Matrixfibroblast = readPeakFile(cell.Matrixfibroblast))
-library(scales)
-color.use <- as.vector(hue_pal()(n=9))                                     
-peakHeatmap(peak.list, TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, upstream=3000, downstream=3000, color=color.use)                                        
+# add motif information
+multi.joint <- AddMotifs(
+  object = multi.joint,
+  genome = BSgenome.Mmusculus.UCSC.mm10,
+  pfm = pfm
+)
 
-
-
-
-# Generation of Dotplot
-DotPlot(acd.combined, features = c('Acvrl1','Acvr1b','Acvr1c','Bmpr1a','Bmpr1b','Tgfbr1','Tgfbr2','Acvr2a','Acvr2b','Bmpr2'), cols = c("blue","red"), dot.scale = 8,split.by = "orig.ident") + RotatedAxis() + coord_flip()
-# Generation of correlation plot among clusters
-palette = colorRampPalette(c("green", "white", "red")) (20)
-av.exp <- AverageExpression(acd.combined)$RNA
-cor.exp <- as.matrix(cor(av.exp))
-heatmap(x = cor.exp, col = palette,Rowv = NA,symm = TRUE,scale = "row",margins = c(8, 8))
-# Cells distribution across clusters and pie plot
-cell.prop <- prop.table(table(Idents(acd.combined),acd.combined$orig.ident),2)
-cell.prop <- 100*cell.prop
-cell.prop <- as.data.frame(cell.prop)
-names(cell.prop)[1:3] <- c('Cluster','group','value')
-ggplot(cell.prop, aes(fill=Cluster, y=value, x=group)) + geom_bar(position="stack", stat="identity") + theme_bw() + scale_y_continuous(expand = c(0,0),limits = c (0,100)) + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=15),axis.title.x =element_text(size=0),axis.title.y=element_text(size=0),axis.text.x =element_text(size=0),axis.text.y=element_text(size=15))
-ggplot(cell.prop[1:12,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
-ggplot(cell.prop[13:24,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
-# 
+multi.joint <- RunChromVAR(
+  object = multi.joint,
+  genome = BSgenome.Mmusculus.UCSC.mm10
+)
 
 
+DefaultAssay(multi.joint) <- 'chromvar'
 
+# look at the activity of Foxf1
+FeaturePlot(object = multi.joint,features = "MA1606.1",min.cutoff = 'q10',max.cutoff = 'q90',pt.size = 0.1)
 
+# find cell type TF enrichment and unique
+tf.enrich <- FindAllMarkers(multi.motif, only.pos = T, assay = "chromvar")
+top30 <- tf.enrich %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
+tf.unique <- unique(tf.enrich$gene)
+chrommat <- AverageExpression(multi.motif, assays = "chromvar", features = tf.unique) %>%
+  as.data.frame()
+tf.uniquename <- ConvertMotifID(object = multi.motif, id = tf.unique)
+names(chrommat) <- levels(multi.motif)
+rownames(chrommat) <- tf.uniquename
 
+# sort the matrix to find column index for TF activity
+chromemat <- chromemat[do.call(order, c(chromemat, list(decreasing=TRUE))),]
+chromemat$max <- max.col(chromemat)
+chromemat <- chromemat[order(chromemat$max), ]
+chromemat <- dplyr::select(chromemat, -max)
+
+ann_colors = list(cluster = c(`CAP1 (gCAP)` = '#F8766D', `CAP2 (aCAP)` = '#D39200', Artery = '#93AA00',Venous = '#00BA38', Lymphatics = '#00C19F', Pericyte = '#00B9E3',Fibroblast = '#619CFF', Myofibroblast = '#DB72FB',Matrixfibroblast = '#FF61C3'))
+color.list <- setNames(split(color.data, seq(nrow(color.data))), rownames(color.data))
+pheatmap(chromemat,scale = "row",cluster_cols=F,cluster_rows = F,annotation_col = col.data, annotation_colors = color.list,angle_col = 315,color = colorRampPalette(c("blue","white","red"))(100),show_rownames=F)
+
+# Generation of Vlnplot of Foxf1 expression
+VlnPlot(multi.gex, features = c("Foxf1", "Ebf1"), ncol = 2,pt.size = 0)
+
+# Coverageplot of Foxf1 genomic region
+bw.path <- "~/bigwig/"
+CoveragePlot(
+object = multi.joint,
+region = "chr8-120800001-121100000",
+annotation = T,
+bigwig = bw.path,
+bigwig.type = "coverage"
+ncol = 1
+)
