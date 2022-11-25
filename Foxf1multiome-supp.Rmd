@@ -1,3 +1,7 @@
-library(Signac);library(Seurat);library(ggplot2)
+# load required packages
+library(Signac);library(Seurat);library(ensembldb);library(EnsDb.Mmusculus.v79);library(patchwork);library(RColorBrewer);library(stringr)
+library(ChIPseeker);library("TxDb.Mmusculus.UCSC.mm10.knownGene");library("org.Mm.eg.db");library(BSgenome.Mmusculus.UCSC.mm10);
+library(EnsDb.Mmusculus.v79);library(JASPAR2020);library(TFBSTools);library(motifmatchr)
+
 BigwigTrack('chr8-120800001-120810000',as.list(figtest),smooth = 200,type = "coverage", bigwig.scale = "separate", ymax = NULL, max.downsample = 3000,downsample.rate = 0.1) + scale_fill_discrete()
 figtest <- list.files(pattern="*.bw")
