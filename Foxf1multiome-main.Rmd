@@ -183,3 +183,49 @@ bigwig = bw.path,
 bigwig.type = "coverage"
 ncol = 1
 )
+# plot regions of human genome for both donor and patient
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-85920001-86520000",
+  annotation = T,
+  peaks = T,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-86020001-86040001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-86140001-86160001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-86075001-86095001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-86175001-86195001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+CoveragePlot(
+  object = acd5.joint,
+  region = "chr16-86500001-86520001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
