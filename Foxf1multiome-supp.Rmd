@@ -25,11 +25,152 @@ library(scales)
 color.use <- as.vector(hue_pal()(n=9))                                     
 peakHeatmap(peak.list, TxDb = TxDb.Mmusculus.UCSC.mm10.knownGene, upstream=3000, downstream=3000, color=color.use)   
 
-
-
-
-
-
-
 BigwigTrack('chr8-120800001-120810000',as.list(figtest),smooth = 200,type = "coverage", bigwig.scale = "separate", ymax = NULL, max.downsample = 3000,downsample.rate = 0.1) + scale_fill_discrete()
 figtest <- list.files(pattern="*.bw")
+
+# human ACDMPV data processing
+
+library(ensembldb);library(EnsDb.Hsapiens.v86);library(BSgenome.Hsapiens.UCSC.hg38)
+library(Signac);library(Seurat);library(ggplot2);library(scales);library(pheatmap)
+library(JASPAR2020);library(TFBSTools);library(motifmatchr)
+
+set.seed(1234)
+
+acd5.counts <- Read10X_h5("~/acdonor/ACD5_Multiome_filtered_feature_bc_matrix.h5")
+fragpath <- "~/acdonor/ACD5_Multiome_atac_fragments.tsv.gz"
+
+# get gene annotations for hg38
+edb <- EnsDb.Hsapiens.v86
+seqlevelsStyle(edb) <- "UCSC"
+annotations <- GetGRangesFromEnsDb(ensdb = edb)
+genome(annotations) <- "hg38"
+
+# create a Seurat object containing the RNA adata
+acd5.joint <- CreateSeuratObject(
+  counts = acd5.counts$`Gene Expression`,
+  assay = "RNA"
+)
+
+# create ATAC assay and add it to the object
+acd5.joint[["ATAC"]] <- CreateChromatinAssay(
+  counts = acd5.counts$Peaks,
+  sep = c(":", "-"),
+  fragments = fragpath,
+  annotation = annotations
+)
+
+# Quality control
+DefaultAssay(acd5.joint) <- "ATAC"
+
+acd5.joint <- NucleosomeSignal(acd5.joint)
+acd5.joint <- TSSEnrichment(acd5.joint)
+
+VlnPlot(
+  object = acd5.joint,
+  features = c("nCount_RNA", "nCount_ATAC", "TSS.enrichment", "nucleosome_signal"),
+  ncol = 4,
+  pt.size = 0
+)
+
+acd5.joint <- NucleosomeSignal(object = acd5.joint)
+acd5.joint <- TSSEnrichment(acd5.joint, fast = FALSE)
+
+
+# Joint UMAP visualization
+
+# build a joint neighbor graph using both assays
+acd5.joint <- FindMultiModalNeighbors(
+  object = acd5.joint,
+  reduction.list = list("pca", "lsi"), 
+  dims.list = list(1:50, 2:40),
+  modality.weight.name = "RNA.weight",
+  verbose = TRUE
+)
+
+# build a joint UMAP visualization
+acd5.joint <- RunUMAP(
+  object = acd5.joint,
+  nn.name = "weighted.nn",
+  assay = "RNA",
+  verbose = TRUE
+)
+
+DimPlot(acd5.joint, label = TRUE, repel = TRUE, reduction = "umap") + NoLegend()
+DimPlot(acd5.joint, label = FALSE, repel = TRUE, reduction = "umap")
+
+#process metadata
+control.meta <- read.table('control.meta.txt', header = T, sep = "", dec = ".")
+work.meta <- control.meta %>% separate(cell, c("sample","barcode"), sep = "_")
+meta.110 <- work.meta[work.meta$sample == 'D110',]
+
+# read count files
+matrix_dir = "open/"
+barcode.path <- paste0(matrix_dir, "barcodes.tsv.gz")
+features.path <- paste0(matrix_dir, "features.tsv.gz")
+matrix.path <- paste0(matrix_dir, "matrix.mtx.gz")
+mat <- readMM(file = matrix.path)
+mat.dgc <- as(mat, "dgCMatrix")
+feature.names = read.delim(features.path, header = FALSE, stringsAsFactors = FALSE)
+barcode.names = read.delim(barcode.path, header = FALSE, stringsAsFactors = FALSE)
+rownames(mat.dgc) = as.vector(barcode.names$V1)
+colnames(mat.dgc) = as.vector(feature.names$V1)
+
+# hg19 to hg38
+peaks.hg19 <- StringToGRanges(regions = paste0 ('chr', colnames(mat.dgc)), sep = c(":", "-"))
+hg19tohg38 <- rtracklayer::import.chain("~/hg19ToHg38.over.chain")
+peaks.hg38 <- rtracklayer::liftOver(x = peaks.hg19, chain = hg19tohg38)
+names(peaks.hg38) <- colnames(mat.dgc)
+
+
+control <- RunUMAP(object = control, reduction = 'lsi', dims = 2:30)
+control <- FindNeighbors(object = control, reduction = 'lsi', dims = 2:30)
+control <- FindClusters(object = control, verbose = FALSE, algorithm = 3)
+DimPlot(object = control, label = TRUE) + NoLegend()
+
+control <- RenameIdents(control, "alveolar_type_2" = 'Epithelial', "alveolar_type_1" = 'Epithelial', "club" = 'Epithelial',"ciliated" = 'Epithelial', "pulmonary_neuroendocrine" = 'Epithelial', "basal" = 'Epithelial')
+control <- RenameIdents(control, "matrix_fibroblast_2" = 'Mesenchymal', "matrix_fibroblast_1" = 'Mesenchymal', "myofibroblast" = 'Mesenchymal',"pericyte" = 'Mesenchymal')
+control <- RenameIdents(control, "capillary_endothelial_1" = 'Endothelial', "arterial_endothelial" = 'Endothelial', "capillary_endothelial_2" = 'Endothelial',"lymphatic_endothelial" = 'Endothelial')
+
+Idents(control) <- factor(Idents(control), levels = c("AT1", "AT2", "Ciliated", "Endothelial", "Fibroblast", "Pericyte", "Matrixfibroblast"))
+
+CoveragePlot(
+  object = control,
+  region = "chr16-86020001-86040001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = control,
+  region = "chr16-86075001-86095001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = control,
+  region = "chr16-86140001-86160001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = control,
+  region = "chr16-86175001-86195001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+CoveragePlot(
+  object = control,
+  region = "chr16-86500001-86520001",
+  annotation = F,
+  peaks = F,
+  ncol = 1
+)
+
+
