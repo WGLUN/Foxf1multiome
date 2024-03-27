@@ -1,4 +1,4 @@
-# R packages used
+# R packages used for data analysis
 R version 4.1.2 (2021-11-01)
 Platform: x86_64-apple-darwin17.0 (64-bit)
 Running under: macOS Catalina 10.15.7
