@@ -229,3 +229,51 @@ CoveragePlot(
   peaks = F,
   ncol = 1
 )
+
+# scCustomize used to read multiple folder or h5 into matrix
+fel.matrix <- readRDS("~/fel.matrix.rds")
+
+# target of assignment expands to non-language object?
+for (sample in fel.matrix){
+  assign(paste0("so",names(sample), sep = ""), names(sample)) <- CreateSeuratObject(counts = sample, project = 'toupper(names(sample)')
+}
+# doubles prediction using python module scrublet
+# Create seurat object with doublets predicted
+fel0.so <- CreateSeuratObject(counts = fel.matrix$fel0, project = "FEL0", meta.data = fel0.meta)
+fel1.so <- CreateSeuratObject(counts = fel.matrix$fel1, project = "FEL1", meta.data = fel1.meta)
+fel4.so <- CreateSeuratObject(counts = fel.matrix$fel4, project = "FEL4", meta.data = fel4.meta)
+# calculation of percentage of mitochondrial genes
+fel0.so[["percent.mt"]] <- PercentageFeatureSet(fel0.so, pattern = "^mt-")
+fel1.so[["percent.mt"]] <- PercentageFeatureSet(fel1.so, pattern = "^mt-")
+fel4.so[["percent.mt"]] <- PercentageFeatureSet(fel4.so, pattern = "^mt-")
+# quality control
+fel0.qc <- VlnPlot(fel0.so, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+fel1.qc <- VlnPlot(fel1.so, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+fel4.qc <- VlnPlot(fel4.so, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+library(patchwork)
+fel0.qc | fel1.qc | fel4.qc
+save.image(file = "fel.basis.rdata")
+# cell filtration based on QC
+library(Seurat)
+fel0 <- subset(fel0.so, subset = nCount_RNA > 2000 & nCount_RNA < 20000 & percent.mt < 20)
+fel1 <- subset(fel1.so, subset = nCount_RNA > 2000 & nCount_RNA < 30000 & percent.mt < 20)
+fel4 <- subset(fel4.so, subset = nCount_RNA > 2000 & nCount_RNA < 30000 & percent.mt < 20)
+# integration analysis
+fel.list <- list(fel0,fel1,fel4)
+fel.list <- lapply(X = fel.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+fel.anchors <- FindIntegrationAnchors(object.list = fel.list, dims = 1:20)
+fel.work <- IntegrateData(anchorset = fel.anchors, dims = 1:20)
+DefaultAssay(fel.work) <- "integrated"
+fel.work <- ScaleData(fel.work,verbose = FALSE)
+fel.work <- RunPCA(fel.work, npcs = 30, verbose = FALSE)
+ElbowPlot(fel.work)
+fel.work <- RunUMAP(fel.work, reduction = "pca", dims = 1:8)
+fel.work <- FindNeighbors(fel.work, reduction = "pca", dims = 1:8)
+fel.work <- FindClusters(fel.work, resolution = 0.5)
+DimPlot(fel.work, reduction = "umap",split.by = 'orig.ident')
+DimPlot(fel.work, reduction = "umap", label = T) + NoLegend()
+Idents(fel.move) <- factor(Idents(fel.move), levels = c("Endothelial","Epithelial","Fibroblast", "Myofibroblast", "Matrixfibroblast", "Pericyte"))
+save.image(file = "fel.start.rdata")
