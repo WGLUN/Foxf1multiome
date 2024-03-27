@@ -172,5 +172,97 @@ CoveragePlot(
   peaks = F,
   ncol = 1
 )
+# PieDonut plot
+library(ggplot2)
+library(webr)
+library(dplyr)
+names(pie.data) <- c('Cluster','Group','Frequency')
+require(plyr)
+pie.data <- as.data.frame(table(Idents(fel.move),fel.move$orig.ident))
+pie.data$Group <- mapvalues(pie.data$Group, from=c("FEL0","FEL1","FEL4"), to=c("WT","MT1","MT4"))
 
+PieDonut(pie.data, aes(Cluster, Group, count = Frequency),labelposition = 5, labelpositionThreshold = 0.5, addPieLabel = False, addDonutLabel = False,showRatioDonut = F, showRatioPie = F,showPieName = F,use.labels = F)
+PieDonut(pie.data, aes(Cluster, Group, count = Frequency),explode = 1,explodePie = T,explodeDonut = T,labelposition = 5, labelpositionThreshold = 0.5,addPieLabel = False, addDonutLabel = False,showRatioDonut = F, showRatioPie = F,showPieName = F,use.labels = F)
+PieDonut(pie.data, aes(Cluster, Group, count = Frequency),start = 2.5*pi/2,explode = 4,explodePie = T,explodeDonut = T,labelposition = 5, labelpositionThreshold = 0.5,addPieLabel = False, addDonutLabel = False,showRatioDonut = F, showRatioPie = F,showPieName = F,use.labels = F)
+# myofibroblast
+fel.myo <- subset(fel.move,idents = 'Myofibroblast')
+fel.myo <- subset(fel.myo,idents = c('5','7','11'),invert = T)
+fel.myo <- subset(fel.myo,cells = cell.look,invert = T)
 
+DimPlot(fel.myo, label = F,cols = c('blue','orange'),split.by = 'orig.ident') 
+DimPlot(fel.myo, label = F,cols = c('blue','orange'))
+
+FeaturePlot(fel.myo, features = c("Acta2","Crip2","Cdh11","Tpm2","Cox4i2",'Ptprd'), ncol = 3)
+pie.myo <- data.frame(table(Idents(fel.myo),fel.myo$orig.ident))
+names(pie.myo) <- c('Cluster','Group','Frequency')
+pie.myo$Group <- mapvalues(pie.myo$Group,
+from=c("FEL0","FEL1","FEL4"),
+to=c("WT","MT1","MT4"))
+
+pie.myo$Cluster <- mapvalues(pie.myo$Cluster, from=c("4","15"), to=c("VSMC","ASMC"))
+ggdonutchart(pie.myo[c(1,3,5),],'Frequency',fill = 'Group',label = 'Group',color = 'white',palette = hue_pal(h = c(90, 270))(3)) + theme(legend.position = "none",legend.title=element_blank(),legend.text=element_text(size=0),axis.text.x =element_text(size=0))
+ggdonutchart(pie.myo[c(2,4,6),],'Frequency',fill = 'Group',label = 'Group',color = 'white',palette = hue_pal(h = c(90, 270))(3)) + theme(legend.position = "bottom",legend.title=element_blank(),legend.text=element_text(size=15),axis.text.x =element_text(size=0))
+fel.myo <- RenameIdents(fel.myo, "4" = 'VSMC', "15" = 'ASMC')
+DimPlot(fel.myo, reduction = "umap",cells.highlight = cell.plot,cols.highlight = scales::hue_pal()(6)[1]) + NoLegend()
+
+# Chimera single cell 
+fel.work <- readRDS("~/acdata/fel.towork.rds")
+fel.work <- RenameIdents(fel.work, "0" = "Endothelial", "3" = "Endothelial", "6" = "Endothelial", "10" = "AT1","11" = "AT2","4" = "Myofibroblast","15" = "Myofibroblast","1" = "Pericyte","5" = "Pericyte","7" = "Fibroblast","9" = "Fibroblast","2" = "Matrixfibroblast","8" = "Matrixfibroblast")
+fel.work <- RenameIdents(fel.work, "AT1" = 'Epithelial', "AT2" = 'Epithelial')
+Idents(fel.work) <- factor(Idents(fel.work), levels = c("Endothelial","Epithelial","Fibroblast", "Myofibroblast", "Matrixfibroblast", "Pericyte"))
+VlnPlot(fel.work, features = 'Foxf1', pt.size = 0,split.by = 'orig.ident') + theme(legend.position = "none",axis.title.x = element_text(size=0),axis.title.y = element_text(size=0),axis.text.x = element_text(size=15),axis.text.y = element_text(size=15),strip.text.y = element_text(size = 15))
+
+plots <- VlnPlot(subset(fel.work,idents = c('Endothelial','Fibroblast','Pericyte')), features = 'Foxf1', pt.size = 0,split.by = 'orig.ident') + NoLegend()
+plots <- VlnPlot(subset(fel.work,idents = 'Endothelial'), features = 'Foxf1', pt.size = 0,split.by = 'orig.ident',cols = c("#F8766D", "#078992", "#B79F00")) + NoLegend()
+plots <- VlnPlot(subset(fel.work,idents = 'Fibroblast'), features = 'Foxf1', pt.size = 0,split.by = 'orig.ident') + NoLegend()
+plots <- VlnPlot(subset(fel.work,idents = 'Pericyte'), features = 'Foxf1', pt.size = 0,split.by = 'orig.ident') + NoLegend()
+for(i in 1:length(plots)) {
+  plots[[i]] <- plots[[i]] + geom_boxplot(width=0.1, color="black", alpha = 0.8,position = position_dodge(width = 0.9),outlier.colour = NA) + theme(legend.position = 'none')
+}
+plots
+
+endothelial <- subset(fel.work,idents = 'Endothelial')
+fibroblast <- subset(fel.work,idents = 'Fibroblast')
+pericyte <- subset(fel.work,idents = 'Pericyte')
+
+fe0 <- GetAssayData(subset(endothelial,subset = orig.ident == 'FEL0'),slot = 'data')
+fe1 <- GetAssayData(subset(endothelial,subset = orig.ident == 'FEL1'),slot = 'data')
+fe4 <- GetAssayData(subset(endothelial,subset = orig.ident == 'FEL4'),slot = 'data')
+
+ff0 <- GetAssayData(subset(fibroblast,subset = orig.ident == 'FEL0'),slot = 'data')
+ff1 <- GetAssayData(subset(fibroblast,subset = orig.ident == 'FEL1'),slot = 'data')
+ff4 <- GetAssayData(subset(fibroblast,subset = orig.ident == 'FEL4'),slot = 'data')
+
+fp0 <- GetAssayData(subset(pericyte,subset = orig.ident == 'FEL0'),slot = 'data')
+fp1 <- GetAssayData(subset(pericyte,subset = orig.ident == 'FEL1'),slot = 'data')
+fp4 <- GetAssayData(subset(pericyte,subset = orig.ident == 'FEL4'),slot = 'data')
+
+fe0.mean <- mean(fe0[rownames(fe0) == 'Foxf1',])
+fe1.mean <- mean(fe1[rownames(fe1) == 'Foxf1',])
+fe4.mean <- mean(fe4[rownames(fe4) == 'Foxf1',])
+
+ff0.mean <- mean(ff0[rownames(ff0) == 'Foxf1',])
+ff1.mean <- mean(ff1[rownames(ff1) == 'Foxf1',])
+ff4.mean <- mean(ff4[rownames(ff4) == 'Foxf1',])
+
+fp0.mean <- mean(fp0[rownames(fp0) == 'Foxf1',])
+fp1.mean <- mean(fp1[rownames(fp1) == 'Foxf1',])
+fp4.mean <- mean(fp4[rownames(fp4) == 'Foxf1',])
+
+library(scales)
+for(i in 6:8){
+  show_col(hue_pal()(i))
+}
+unique(ggplot_build(p)$data[[1]]$fill)
+show_col(unique(ggplot_build(p)$data[[1]]$fill))
+
+fel.work <- readRDS("~/fels.work.rds")
+endothelial <- subset(fel.work,idents = 'Endothelial')
+fibroblast <- subset(fel.work,idents = 'Fibroblast')
+pericyte <- subset(fel.work,idents = 'Pericyte')
+Idents(endothelial) <- 'orig.ident'
+Idents(fibroblast) <- 'orig.ident'
+Idents(pericyte) <- 'orig.ident'
+fel1.endo <- FindMarkers(endothelial, ident.1 = 'FEL1',ident.2 = c('FEL0','FEL4'),logfc.threshold = 0.5,min.pct = 0.3)
+fel4.fibro <- FindMarkers(fibroblast, ident.1 = 'FEL4',ident.2 = c('FEL0','FEL1'),logfc.threshold = 0.5,min.pct = 0.3)
+fel4.peri <- FindMarkers(pericyte, ident.1 = 'FEL4',ident.2 = c('FEL0','FEL1'),logfc.threshold = 0.5,min.pct = 0.3)
